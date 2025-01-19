@@ -1,0 +1,553 @@
+---
+title: "DESeq2 - Analyzing RNA-seq data"
+subtitle: "Tesina per il corso di Statistica Applicata e Analisi dei Dati A.A. 2024/2025"
+author: "Claudia Costa, matr. 153256"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: no
+    toc_depth: 3
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+\tableofcontents
+
+\newpage
+
+# Introduzione
+
+In questa tesina viene descritto il pacchetto \href{https://www.bioconductor.org/packages/release/bioc/html/DESeq2.html}{DESeq2} \href{https://bioconductor.org/packages/release/bioc/vignettes/DESeq2/inst/doc/DESeq2.html}{(vignetta)}, uno strumento specifico per l'analisi differenziale dell'espressione genica basata sulla distribuzione binomiale negativa.
+Il pacchetto fa parte di \href{https://www.bioconductor.org/}{Bioconductor}, un progetto che mira a sviluppare e condividere software open source per l'analisi dati biologici.
+
+La tesina è strutturata in tre parti principali: nella prima viene introdotta la teoria alla base dell'analisi differenziale dell'espressione genica, mentre nella seconda si approfondiscono le caratteristiche del pacchetto DESeq2 e i principi teorici su cui si basa.
+
+Infine, nella terza parte viene presentato un esempio pratico di utilizzo di DESeq2, applicandolo ad una full count matrix del dataset di RNA-seq che fa parte dello studio \href{https://pubmed.ncbi.nlm.nih.gov/25464849/}{Kenny PJ et al, Cell Rep 2014}.
+
+# Differential Expression Analysis
+
+## Introduzione
+
+### Che cosa è un gene?
+
+Un gene è l'unità fondamentale di informazione genetica contenuta nel DNA, che codifica per una proteina o un RNA funzionale (ad esempio RNA ribosomiale o microRNA).  
+
+Nei geni codificanti, l'informazione genetica viene trascritta in RNA messaggero (mRNA) e successivamente tradotta in proteine, che svolgono funzioni essenziali per il metabolismo cellulare, la struttura e la comunicazione.
+
+Nei geni non codificanti, l'RNA prodotto ha ruoli regolatori o strutturali.
+
+I geni non sono espressi in modo uniforme: la loro attività, denominata espressione, varia tra tipi di cellule, condizioni ambientali, stati di sviluppo e risposte a stimoli, contribuendo alla diversità biologica e alla funzione specifica dei tessuti.
+
+### Che cosa è l'espressione genica?
+
+L'espressione genica si riferisce al processo attraverso il quale un gene viene attivato per produrre il suo prodotto funzionale. Questo processo può essere suddiviso in due fasi principali:
+\begin{enumerate}
+    \item Trascrizione: DNA viene copiato in RNA (mRNA).
+    \item Traduzione: mRNA viene utilizzato come stampo per la sintesi proteica.
+\end{enumerate}
+
+L'**espressione genica** può essere misurata come la quantità di mRNA prodotto (livello trascrizione) o la quantità della proteina risultante (livello traduzione).
+
+Capire come i geni vengono espressi in condizioni diverse aiuta a rispondere a domande biologiche fondamentali, come quali geni sono coinvolti in una malattia e quali effetti ha un farmaco su una popolazione cellulare.
+
+L'analisi differenziale di espressione, quindi, cerca di identificare quali geni hanno un'espressione significativamente diversa tra gruppi diversi (es. cellule sane vs malate, prima e dopo un trattamento, ecc.).
+
+
+## Concetti di base dell’analisi differenziale di espressione (DEA)
+
+L'analisi differenziale di espressione è una tecnica bioinformatica utilizzata per confrontare l'attività di migliaia di geni tra due o più condizioni sperimentali. Si basa sui dati di RNA-sequencing (RNA-seq), che misurano quantitativamente l'espressione genica. Questo significa che per ciascun gene viene determinato un valore numerico, chiamato conteggio/count, che rappresenta la quantità di RNA messaggero (mRNA) prodotto, fornendo così un'indicazione precisa del livello di attività di quel gene in un dato campione.
+
+L'obiettivo principale è **l'identificazione dei geni con espressione significativamente diversa tra condizioni**, quantificando l'entità del cambiamento (log2 fold change) e valutandone la rilevanza statistica per distinguere variazioni reali dal caso.
+
+In altre parole, ciò che si vuole fare con l'analisi differenziale di espressione è confrontare due condizioni biologicamente distinte, con l'obiettivo di identificare i geni che presentano schemi di espressione diversi tra queste condizioni a causa di fenomeni biologici.
+
+<!-- Supponiamo di voler studiare l'effetto di un farmaco con il suo potenziale di essere usato come terapia antitumorale e di volerne testare l'efficacia, quindi estraiamo i tumori dai pazienti e li inoculiamo in sei topi, tre dei quali hanno ricevuto il trattamento e tre no, in ciascuna condizione. 
+Questo è un tipico esperimento in cui, in ogni condizione, ci sono repliche biologiche. -->
+
+### Distribuzione dei counts
+
+Caratteristiche dei dati di conteggio dell'RNA-Seq: in un esperimento di sequenziamento dell'RNA, dopo che le reads sono state sequenziate e quantificate, ciò che otteniamo è essenzialmente una matrice di counts in cui le righe sono i geni e le colonne sono i campioni e il valore qui è chiamato counts. Queste counts non sono altro che il numero di reads mappate per quel gene in quel campione e il counts è l'unità più elementare per misurare l'espressione genica.
+
+Controlli grafici, come quello riportato nell'analisi, mostrano che i dati dei counts non seguono una distribuzione normale.
+Si potrebbe pensare di utilizzare una distribuzione di Poisson, che descrive il numero di eventi che occorrono in un certo intervallo di tempo o in una regione spaziale. Essa però assume che la media e la varianza siano uguali (parametro $\lambda$), ma nei dati di RNA-seq la varianza è maggiore della media, quindi non è adatta per descrivere questi dati.
+
+Viene perciò utilizzata la distribuzione binomiale negativa, che cattura la variabilità aggiuntiva dovuta a variazioni biologiche, introducendo un parametro di dispersione ($\alpha$).
+ 
+
+
+### Importanza biologica della DEA
+L'analisi differenziale di espressione fornisce un quadro chiaro dei processi molecolari che distinguono una condizione da un’altra. Questo è fondamentale in numerosi contesti:
+\begin{itemize}
+    \item[-] Biologia delle malattie: identificare geni responsabili di malattie o alterati in condizioni patologiche.
+    \item[-] Ricerca farmaceutica: determinare quali geni rispondono a un trattamento.
+    \item[-] Biologia dello sviluppo: studiare le variazioni geniche durante il differenziamento cellulare.
+    \item[-] Ecologia e biologia evolutiva: analizzare l'espressione genica in risposta a stress ambientali. 
+\end{itemize}
+
+
+\newpage
+
+# DESeq2
+
+## Teoria pacchetto
+<!-- Estimate variance-mean dependence in count data from high-throughput sequencing assays and test for differential expression based on a model using the negative binomial distribution. -->
+
+DESeq2 esegue gli step riportati nella figura \ref{fig:workflow} per identificare se un gene è differenzialmente espresso o no. Tutti i passaggi sono eseguiti automaticamente dalla funzione \texttt{DESeq()}.
+<!--
+\begin{itemize}
+    \item stima size factor
+    \item stima dispersione
+    \item fit modello lineare GLM
+    \item test ipotesi con test di Wald
+\end{itemize}
+
+Tutti questi step sono eseguiti dalla funzione \texttt{DESeq()} e sono riportati nella figura \ref{fig:workflow}. -->
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.3\linewidth]{deseq2_workflow_separate.png}
+    \caption{DESeq2 workflow}
+    \label{fig:workflow}
+\end{figure}
+
+### Fit modello
+Il punto di partenza di un'analisi DESeq2 è una matrice dei counts $K$, con una riga per ogni gene $i$ e una colonna per ogni campione $j$. L'entry della matrice $K_{ij}$ indica il numero di reads sequenziate che sono state mappate sul gene $i$ nel campione $j$.
+
+
+Le read counts $K_{ij}$ sono descritte con un GLM della famiglia binomiale negativa, con media $\mu_{ij}$ e dispersione $\alpha_i$.
+
+
+La media $\mu_{ij}=s_j \cdot q_{ij}$ è proporzionale alla concentrazione di frammenti cDNA del gene $i$ nel campione $j$ $q_{ij}$, scalata da un fattore di normalizzazione $s_j$.
+Questo fattore di normalizzazione - sample specific size factor - viene calcolato utilizzando il metodo median of ratios e viene descritto nella sezione successiva.
+
+
+Per ogni gene viene fittato un modello lineare generalizzato (GLM), i quali sono un'estensione dei modelli di regressione lineare che permettono una forma più generale di espressione per la risposta media (che non segue necessariamente una distribuzione normale), utilizzando funzioni di link adeguate e considerando vari tipi di distribuzioni per la risposta. La funzione link trasforma il valore atteso della risposta per renderlo lineare rispetto ai predittore.
+
+Viene utilizzato un GLM con un link logaritmico $log_2(q_{ij})=\sum_r x_{jr} \cdot \beta_{ir}$, con $x_{jr}$ elementi della matrice di design e $\beta_{ir}$ coefficienti.
+Nel caso di un confronto tra due gruppi, come i campioni trattati e quelli di controllo, gli elementi della matrice di design indicano se un campione $j$ è trattato o meno, e il fit GLM restituisce coefficienti che indicano la forza di espressione complessiva del gene e il log2 fold change tra trattamento e controllo.
+
+<!--
+Esempio con 2 condizioni, treated (=1) e untreated (=0)
+
+posso rappresentare l'outcome/gene expression come $y = \beta_0 + x_1 \beta_1$, con $\beta_0$ la baseline expression/control.
+
+primo caso treated:
+\[
+y = \beta_0 + 1 \cdot \beta_1 \\
+\beta_1 = y - \beta_0 \\
+= log(y) - log(\beta_0) \\
+= log(\text{outcome epression}) - log(\text{control expression}) \\
+= log(\text{ou expr / control}) \\
+= \text{treated / control}
+\]
+
+secondo caso untreated:
+\[
+y = \beta_0 + 0 \cdot \beta_1 \\
+y = \beta_0
+\]
+-->
+
+
+### Stima size factor - metodo median of ratios
+Bisogna innanzitutto normalizzare i dati dei counts, per permettere un corretto confronto tra i geni. Per fare ciò è necessario calcolare i size factors.
+
+Il size factor $s_{ij}$ è un fattore di scala che tiene conto della profondità di sequenziamento e della composizione del campione; sono considerati costanti all'interno di un campione, $s_{ij} = s_j$.
+
+Viene calcolato impiegando tre step principali:
+\begin{enumerate}
+    \item calcolo la media geometrica per ciascun gene (geometrica perché è più robusta agli outliers rispetto a quella aritmetica).
+    \item divido counts per la media geometrica.
+    \item calcolo la mediana dei rapporti (calcolati nello step 2).
+\end{enumerate}
+
+Formalmente: $s_j = \text{median}_{i: K_i^R \neq0} \frac{K_{ij}}{K_i^R}$, con $K_i^R = (\prod_{j=1}^{m} K_{ij})^{1/m}$
+
+
+Infine, per normalizzare i dati, si divide ogni counts per il size factor corrispondente.
+
+
+### Stima dispersione per ogni gene
+<!-- for low mean counts, the variance estimates have a much larger spread; therefore, the dispersion estimates will differ much more between genes with small means. -->
+
+<!-- dispersion of 0.01 = 10% of variability between replicates -->
+
+La variabilità all'interno dei replicati è modellata dal parametro di dispersione \(\alpha_i\), che descrive la varianza dei counts secondo la formula \(\text{Var} \; K_{ij} = \mu_{ij} + \alpha_i \mu_{ij}^2\). Questo parametro rappresenta quanto ci si può aspettare che un conteggio osservato si discosti dal valore medio atteso (\(\mu_{ij}\)). Una stima accurata della dispersione è fondamentale per l'inferenza statistica nell'analisi dell'espressione differenziale, poiché campioni di piccole dimensioni possono portare a stime altamente variabili per ciascun gene.
+
+
+Il grafico della media rispetto alla varianza nei dati di counts in figura \ref{fig:meanvariance} mostra che la varianza dell'espressione genica aumenta con l'espressione media (ogni punto nero è un gene). Si noti che la relazione tra media e varianza è lineare sulla scala dei log e che per medie più elevate è possibile prevedere la varianza in modo relativamente accurato in base alla media. Tuttavia, per medie basse, le stime della varianza hanno una dispersione molto più ampia; pertanto, le stime della dispersione differiranno molto di più tra geni con medie piccole.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.4\linewidth]{deseq_mean_vs_variance.png}
+    \caption{Plot della media vs varianza dei counts}
+    \label{fig:meanvariance}
+\end{figure}
+
+
+Per affrontare questo problema, vengono condivise informazioni tra i geni, assumendo che quelli con livelli di espressione simili abbiano anche dispersioni simili.
+
+Il processo inizia con la stima della dispersione di ciascun gene utilizzando il metodo della massima verosimiglianza (MLE), basato unicamente sui dati relativi al gene in questione. Tuttavia, queste stime iniziali possono essere rumorose, soprattutto per geni con bassi conteggi o alta dispersione.
+
+Per ridurre il rumore e migliorare la precisione, viene adattata una curva smooth (curva rossa in figura \ref{fig:dispersion}) alle stime di dispersione di tutti i geni, tenendo conto della dipendenza dalla forza di espressione media. Questa curva rappresenta il valore atteso della dispersione per ciascun livello di espressione, fornendo un riferimento generale. Tuttavia, non cattura necessariamente le deviazioni specifiche dei singoli geni rispetto a questa tendenza.
+
+A questo punto, viene stimata una distribuzione a priori (che rappresenta la conoscenza o le ipotesi iniziali su un parametro sconosciuto) per i valori di dispersione, basandosi sulla conoscenza derivata dal fit della curva e sulle proprietà osservate nei dati. La distribuzione a priori controlla automaticamente l'ampiezza del restringimento, regolando la quantità di "shrinkage" applicata ai valori iniziali di dispersione.
+
+Infine, il modello utilizza questa distribuzione a priori in una seconda fase di stima, ottenendo le stime MAP (Massime a Posteriori) finali della dispersione (rappresentate dalle punte delle frecce blu). Questo restringimento spinge molte delle stime dei geni verso i valori previsti dalla curva fittata, riducendo così il rischio di falsi positivi causati da dispersioni sottostimate.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.8\linewidth]{dispersion.jpg}
+    \caption{Stime di dispersione rispetto alla forza media di espressione}
+    \label{fig:dispersion}
+\end{figure}
+
+Tuttavia, non tutti i geni sono soggetti a questo processo di regolarizzazione. Alcuni geni, evidenziati con un cerchio blu, mostrano una variabilità di dispersione così elevata che DESeq2 presume che non seguano le ipotesi del modello. Per questi geni, è presente una variabilità aggiuntiva che non può essere spiegata dalla sola variazione biologica o tecnica.
+
+Questo approccio bilancia la variabilità specifica di ciascun gene con la tendenza generale osservata nei dati. La forza del restringimento dipende da due fattori principali: (i) quanto i valori reali di dispersione tendano ad aderire alla curva stimata e (ii) i gradi di libertà. Man mano che la dimensione del campione aumenta, il restringimento si riduce progressivamente fino a diventare trascurabile.
+
+Questo metodo consente stime più robuste anche in contesti con informazioni limitate. Tuttavia, per geni con basse medie di espressione, le stime della varianza tendono a essere più ampie, portando a una maggiore variabilità tra le dispersioni stimate per questi geni.
+
+
+<!--
+In primo luogo, i MLE per gene sono ottenuti utilizzando solo i dati del rispettivo gene (punti neri). Quindi, una curva (rossa) viene adattata ai MLE per catturare la tendenza generale della dipendenza tra dispersione e media. Questo fit viene utilizzato come media precedente per un secondo ciclo di stima, che porta alle stime MAP finali della dispersione (teste delle frecce). Questo può essere inteso come un restringimento (lungo le frecce blu) delle stime rumorose dei geni verso il consenso rappresentato dalla linea rossa. I punti neri cerchiati in blu sono stati individuati come outlier di dispersione e non sono stati ridotti verso il priore (il restringimento avrebbe seguito la linea tratteggiata). -->
+
+<!--
+3 step:
+\begin{enumerare}
+    \item si ottiene la stima della dispersione per ogni gene usando la stima della massima verosimiglianza
+    \item fittare una curva alle stime di dispersione dei geni in modo che questa curva rappresenti il valore atteso della dispersione dati i valori di espressione dei geni
+    \item restringere le stime di dispersione dei geni verso i valori previsti dalla curva
+\end{enumerate} -->
+
+
+### Stima log fold change
+
+Una delle difficoltà principali nell'analisi dell'espressione differenziale è la forte varianza (eteroschedasticità) delle stime del log fold change (LFC) per geni con bassi read count. 
+
+Il log fold change è una misura che quantifica la differenza nell'espressione di un gene tra due condizioni. In particolare, il fold change rappresenta il rapporto tra i livelli di espressione nelle due condizioni, mentre il logaritmo (in base 2) di questo rapporto rende più gestibili i valori e simmetriche le variazioni. Ad esempio, un LFC di \(+1\) indica un raddoppio dell'espressione in una condizione rispetto all'altra, mentre un LFC di \(-1\) indica una riduzione a metà.
+
+DESeq2 supera il problema della forte varianza nelle stime del LFC restringendo queste ultime verso lo zero (processo chiamato shrinkage), in modo che il restringimento sia più marcato quando le informazioni disponibili per un gene sono limitate, ad esempio a causa di bassi conteggi, alta dispersione o pochi gradi di libertà.
+
+Come primo passo, vengono eseguiti dei fit di GLMs per ottenere le stime di massima verosimiglianza (MLE) dei LFC. Successivamente, una distribuzione normale centrata su zero viene fittata alla distribuzione osservata delle MLE su tutti i geni. Questa distribuzione normale viene quindi utilizzata come distribuzione a priori sui LFC in una seconda serie di fit GLM. Le stime finali dei LFC sono ottenute applicando il principio della massima a posteriori (MAP), come per la stima della dispersione.
+
+Questi LFC ridotti e i loro errori standard associati vengono utilizzati nei test di Wald per l'espressione differenziale, descritti nella sezione successiva.
+
+La forza del restringimento non dipende semplicemente dalla media dei conteggi, ma dalla quantità complessiva di informazioni disponibili per stimare il fold change. Ad esempio, due geni con conteggi medi simili ma dispersioni diverse subiranno un restringimento diverso. Questo concetto è illustrato nella figura \ref{fig:LFCest}.
+
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.5\linewidth]{LFCestimates.jpg}
+    \caption{Effetto del restringimento sulle stime logaritmiche di fold change}
+    \label{fig:LFCest}
+\end{figure}
+
+Grafici della (A) stima MLE (cioè senza restringimento) e (B) MAP (cioè con restringimento) per le LFC, srispetto alla forza media di espressione. Piccoli triangoli nella parte superiore e inferiore dei grafici indicano i punti che cadrebbero al di fuori della finestra di tracciatura. Due geni con conteggi medi e variazioni logaritmiche MLE simili sono evidenziati con cerchi verdi e viola. (C) I conteggi (normalizzati dai size factors $s_j$) per questi geni rivelano una bassa dispersione per il gene in verde e un'alta dispersione per il gene in viola. (D) Grafici di densità delle verosimiglianze (linee solide) e dei posteriori (linee tratteggiate) per i geni verde e viola e del priore (linea nera solida): a causa della maggiore dispersione del gene viola, la sua verosimiglianza è più ampia e con un picco minore (indicando meno informazioni) e il priore ha maggiore influenza sul suo posteriore rispetto al gene verde. La maggiore curvatura del posteriore verde al suo massimo si traduce in un minore errore standard riportato per la stima MAP LFC (barra di errore orizzontale).
+
+<!--
+Il restringimento delle stime LFC può essere descritto come un compromesso bias-varianza: per i geni con poche informazioni per la stima LFC, si acquista una riduzione della varianza forte al costo di accettare un bias verso lo zero, e questo può risultare in una riduzione complessiva dell'errore quadratico medio. 
+I geni con un'elevata informazione per la stima della LFC avranno, nel nostro approccio, LFC con un basso bias e una bassa varianza. Inoltre, quando i gradi di libertà aumentano e l'esperimento fornisce maggiori informazioni per la stima della LFC, le stime rimpicciolite convergeranno verso quelle non rimpicciolite. -->
+
+
+### Test di ipotesi per l'espressione differenziale
+
+Dopo che i modelli sono stati adattati per ciascun gene, si può verificare se il coefficiente $\beta_{ir}$ di ciascun modello differisce significativamente da zero.
+
+Per i test di significatività, viene utilizzato un test di Wald: la stima dei LFC viene divisa per il suo errore standard, ottenendo una statistica-z, che viene confrontata con una distribuzione normale standard.
+
+Se il p-value è piccolo, rifiutiamo l'ipotesi nulla e affermiamo che esiste un'evidenza contro l'ipotesi nulla (cioè che il gene è differenzialmente espresso).
+
+Formalmente: $\beta_{ir}/\text{SE}(\beta_{ir})$ confrontato con una distribuzione normale standard.
+
+
+# Esempio su dataset
+
+```{r}
+# per installare core pakage
+# if (!require("BiocManager", quietly = TRUE))
+#  install.packages("BiocManager")
+# BiocManager::install()
+```
+
+
+```{r, include=FALSE}
+# caricamento librerie
+library(DESeq2)
+library(tidyverse)
+library(RColorBrewer)
+library(pheatmap)
+library(DEGreport)
+library(gridExtra)
+library(ggplot2)
+library(ggrepel)
+```
+
+Carico i dati e i metadati necessari, specificando che ho un header e che la prima colonna rappresenta i nomi delle righe.
+```{r}
+data <- read.table("Mov10_full_counts.txt", header=T, row.names=1) 
+
+meta <- read.table("Mov10_full_meta.txt", header=T, row.names=1)
+```
+
+Voglio cercare geni che cambiano di espressione tra due o più gruppi, definiti nei metadati.
+
+- **Mov10_oe** (over expression): gene sovraespresso artificialmente, per studiare gli effetti biologici della sovraregolazione del gene.
+
+- **Mov10_kd** (knock down): condizione sperimentale in cui l'espressione del gene è deliberatamente ridotta per studiare i suoi effetti biologici e molecolari.
+
+- **Irrelevant_kd**: condizione di controllo in cui le cellule sono state trattate in modo da non influenzare l'espressione di Mov10 o di altri gen.
+
+```{r}
+unique(meta$sampletype)
+```
+
+## Distribuzione dei counts
+
+Per visualizzare la distribuzione non normale dei counts, plotto un istogramma per il campione *Mov10_kd_2* e una versione zoomata.
+```{r, warning=FALSE}
+plot1 <- ggplot(data) +
+  geom_histogram(aes(x = Mov10_kd_2), stat = "bin", bins = 200) +
+  xlab("Counts di espressione grezzi") +
+  ylab("Numero di geni")
+
+plot2 <- ggplot(data) +
+  geom_histogram(aes(x = Mov10_kd_2), stat = "bin", bins = 200) + 
+  xlim(-5, 250) +
+  xlab("Counts di espressione grezzi") +
+  ylab("Numero di geni")
+
+# combino i plot
+grid.arrange(plot1, plot2, ncol = 2)
+
+```
+
+Si può vedere come la distribuzione dei counts sia asimmetrica e non normale, con molti geni con bassi conteggi.
+
+Per controllare la relazione tra media e varianza, calcolo media e varianza per i replicati Mov10_kd.
+```{r, warning=FALSE}
+mean_counts <- apply(data[, 1:2], 1, mean)
+variance_counts <- apply(data[, 1:2], 1, var)
+df <- data.frame(mean_counts, variance_counts)
+
+ggplot(df) +
+        geom_point(aes(x=mean_counts, y=variance_counts)) + 
+        geom_line(aes(x=mean_counts, y=mean_counts, color="red")) +
+        scale_y_log10() +
+        scale_x_log10()
+
+```
+Noto che la varianza tra i replicati tende a essere maggiore della media (linea rossa), soprattutto per i geni con livelli di espressione medi elevati.
+
+## Creazione oggetto DESeqDataSet
+
+Prima di procedere con l'analisi, è meglio controllare che i nomi dei campioni corrispondano tra i dati e i metadati.
+```{r}
+all(colnames(data) %in% rownames(meta))
+all(colnames(data) == rownames(meta))
+```
+
+
+Per iniziare l'analisi è necessario creare un oggetto \texttt{DESeqDataSet}, utilizzando la matrice dei counts e la tabella dei metadati. Bisogna anche specificare una formula di design, che definisce quali colonne della tabella dei metadati devono essere considerate e come devono essere utilizzate nell'analisi. Nel dataset, la colonna di interesse è \texttt{sampletype}, che contiene tre livelli di fattore. 
+Questi livelli indicano a DESeq2 di valutare, per ciascun gene, le variazioni nell'espressione genica tra le diverse condizioni sperimentali rappresentate.
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = data, colData = meta, design = ~ sampletype)
+```
+
+Per visualizzare i dati, è bene prima normalizzarli. Questo passaggio è in più, la funzione \texttt{DESeq()} esegue automaticamente tutti i passaggi necessari.
+```{r}
+dds_norm <- estimateSizeFactors(dds)
+```
+
+Per recuperare la matrice dei counts normalizzati, uso la funzione \texttt{counts()} e aggiungo l'argomento \texttt{normalized=TRUE}.
+```{r}
+normalized_counts <- counts(dds_norm, normalized=TRUE)
+write.table(normalized_counts, file="normalized_counts.txt", sep="\t", quote=F, col.names=NA)
+```
+
+
+### Analisi di controllo di qualità dei dati
+Per migliorare le distanze/clustering per i metodi di visualizzazione PCA e di clustering gerarchico, è necessario moderare la varianza rispetto alla media applicando la trasformazione *rlog* ai counts normalizzati.
+Questa funzione trasforma i dati di counts in scala log2 in modo da minimizzare le differenze tra i campioni per le righe con counts piccoli. L'argomento \texttt{blind=TRUE} produce una trasformazione non influenzata dalle informazioni sulle condizioni del campione.
+```{r}
+rld <- rlog(dds_norm, blind=TRUE)
+```
+
+#### PCA
+La libreria offre una funzione built-in per plot PCA, richiede in input l'oggetto rlog e la colonna dei metadati di interesse.
+```{r, warning=FALSE}
+plotPCA(rld, intgroup="sampletype")
+```
+
+#### Clustering gerarichico
+Per visualizzare le correlazioni tra i campioni, bisogna calcolare la matrice di correlazione dei counts rlog.
+Prima estraggo la matrice rlot dall'oggetto e poi calcolo i valori di correlazione a coppie per i campioni.
+```{r}
+rld_mat <- assay(rld) # assay() funzione caricata dalle dipendenze di DESeq2
+rld_cor <- cor(rld_mat) 
+
+head(rld_cor)
+```
+
+Valori di correlazione plottati come una heatmap.
+```{r}
+heat.colors <- brewer.pal(6, "YlGn")
+pheatmap(rld_cor, color = heat.colors)
+```
+
+Osservo correlazioni elevate che suggeriscono l'assenza di campioni anomali. Analogamente al plot PCA, i campioni si raggruppano per gruppi di campioni. L'insieme di questi grafici suggerisce che i dati sono di buona qualità.
+
+## Analisi di espressione differenziale
+Uso l'oggetto DESeqDataSet creato in precedenza. Come già ripetuto, la funzione \texttt{DESeq()} esegue tutti i passaggi ma il pacchetto offre delle singole funzioni che permettono di eseguire ogni fase del workflow in modo graduale.
+```{r}
+dds_an <- DESeq(dds)
+```
+
+Controllo i size factors stimati per ogni campione.
+```{r}
+sizeFactors(dds_an)
+```
+
+Numero totale di counts grezzi per ogni campione:
+```{r}
+colSums(counts(dds_an))
+```
+
+e numero totale di counts normalizzati per ogni campione:
+```{r}
+colSums(counts(dds_an, normalized=T))
+```
+
+Plot della dispersione stimata per ciascun gene rispetto alla media di espressione.
+```{r}
+plotDispEsts(dds_an)
+```
+
+Poiché il campione è di dimensioni ridotte, per molti geni si osserva un restringimento (shrinkage) ma nel complesso i dati sono adatti al modello di DESeq2.
+
+### Test di ipotesi
+Come descritto nella sezione 3.1.5, i coefficienti $\beta_{ir}$ (ristretti/shrunken) rappresentano i LFC per ogni gruppo di campioni. Bisogna quindi testare se questi coefficienti sono significativamente diversi da zero, cioè che non vi sia espressione differenziale tra i gruppi di campioni.
+
+
+Per indicare a DESeq2 i due gruppi che voglio confrontare bisogna usare i contrasti. Questi vengono utilizzati per eseguire i test di espressione differenziale utilizzando il test di Wald. 
+
+
+I contrasti possono essere forniti a DESeq2 in due modi diversi: 
+
+- senza fare nulla, in modo automatico viene utilizzato il livello del fattore di base della condizione di interesse come base per i test statistici. Il livello di base viene scelto in base all'ordine alfabetico dei livelli.
+
+- specificare il confronto di interesse e i livelli da confrontare nella funzione \texttt{results()}. Il livello indicato per ultimo è il livello di base per il confronto.
+
+
+I possibili confronti a coppie sono i tre seguenti, con i primi due che sono più di interesse:
+
+1. controllo vs Mov10 overexpression
+
+2. controllo vs Mov10 knockdown
+
+3. Mov10 knockdown vs Mov10 overexpression
+
+
+Definisco i contrasti, estraggo la tabella dei risultati e restringo i LFC.
+
+```{r, warning=FALSE, include=FALSE}
+contrast_oe <- c("sampletype", "MOV10_overexpression", "control")
+
+res_tableOE_unshrunken <- results(dds_an, contrast=contrast_oe)
+
+res_tableOE <- lfcShrink(dds_an, contrast=contrast_oe, res=res_tableOE_unshrunken, type = "normal")
+```
+
+Il nome fornito nel secondo elemento è il livello utilizzato come baseline. Ad esempio, se si osserva una variazione log2 fold di -2, significa che l'espressione genica è più bassa in Mov10_oe rispetto al controllo.
+
+
+### Visualizzazione ed esplorazione dei risultati
+
+
+Il plot MA mostra la media dei counts normalizzati rispetto ai LFC per tutti i geni analizzati. I geni che sono differenzialmente espressi in modo significativo sono colorati in blu. 
+Questo plot consente di visualizzare graficamente l'effetto del restringimento della LFC, mostrando allo stesso tempo l'entità dei fold change e la loro distribuzione rispetto all'espressione media; in generale, ci si aspetta di osservare geni significativi lungo l'intera gamma dei livelli di espressione.
+
+```{r}
+plotMA(res_tableOE_unshrunken, ylim=c(-2,2))
+```
+
+
+```{r}
+plotMA(res_tableOE, ylim=c(-2,2))
+```
+
+I risultati dell'analisi sono memorizzati in una specie di dataframe, che contiene queste colonne:
+baseMean: media dei counts normalizzati per ogni campione; log2FoldChange: log2 fold change; lfcSE: standard error; stat: statistca Wald; pvalue: p-value del test di Wald; padj: p-value aggiustato BH.
+
+```{r}
+res_tableOE
+```
+
+È fondamentale aggiustare i p-value per controllare il tasso di falsi positivi (False Discovery Rate, FDR). Questo viene realizzato tramite il metodo di Benjamini-Hochberg (BH), che ordina i geni in base ai loro p-value e moltiplica ciascun p-value ordinato per il rapporto \( m/\text{rank} \), dove \( m \) rappresenta il numero totale di test eseguiti e \(\text{rank}\) la posizione del gene nell'ordinamento.
+
+
+La funzione \texttt{summary()} fornisce un riassunto dei risultati dell'analisi.
+```{r}
+summary(res_tableOE)
+```
+
+Oltre al numero di geni up- e down-regolati, la funzione riporta anche il numero di geni che sono stati testati (geni con read counts totale non nullo) e il numero di geni non inclusi nella correzione dei test multipli a causa di un conteggio medio basso.
+
+
+Prima di estrarre i geni significativamente espressi, aggiungo una soglia di FDR e LFC per ridurre il numero di geni significativi.
+
+```{r}
+# setto soglie
+padj_cutoff <- 0.05
+lfc_cutoff <- 0.58
+```
+
+Il valore di lfc.cutoff è impostato su 0,58, questo si traduce in un incremento di circa 1,5 volte nell'espressione ($2^{0.58}\approx1.5$). Considero quindi solo quei geni che mostrano un'incremento o diminuzione di almeno il 50% rispetto al controllo.
+
+Per selezionare i geni significativi, utilizzo la funzione \texttt{filter()} di dplyr per estrarre i geni usando le soglie definite sopra.
+```{r}
+sigOE <- res_tableOE %>%
+  data.frame() %>%
+  rownames_to_column(var="gene") %>% 
+  as_tibble() %>%
+  filter(padj < padj_cutoff & abs(log2FoldChange) > lfc_cutoff)
+```
+
+I risultati vengono ridotti, da 23368 a 870 geni significativi.
+```{r}
+sigOE %>%
+  arrange(padj)
+```
+
+
+Come plot finale, esamino le read counts per un singolo gene nei vari gruppi; per fare ciò scelgo il gene che ha il p-value più piccolo.
+```{r}
+name <- sigOE$gene[which.min(sigOE$padj)]
+pc <- plotCounts(dds, gene=name, intgroup="sampletype", returnData = TRUE)
+
+ggplot(pc, aes(x = sampletype, y = count, color = sampletype)) + 
+  geom_point(position=position_jitter(w = 0.1,h = 0)) +
+  geom_text_repel(aes(label = rownames(pc))) + 
+  theme_bw() +
+  ggtitle(name) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+L'espressione del gene è significativamente più alta nel gruppo MOV10_overexpression, questo suggerisce un'efficace sovraregolazione del gene. Nei gruppi Control e MOV10_knockdown, l'espressione del gene è trascurabile, indicando che il knockdown è riuscito e che non ci sono livelli significativi di espressione anche nel controllo.
+Il plot quindi evidenzia una chiara differenza nell'espressione del gene tra i tre gruppi, supportando il successo delle condizioni sperimentali.
+
+
+# Acronimi
+
+**GLM** generalized linear model
+
+**LFC** log fold change
+
+**MAP** maximum a posteriori
+
+**MLE** maximum likelihood estimate
+
+**RNA-seq** RNA sequencing
